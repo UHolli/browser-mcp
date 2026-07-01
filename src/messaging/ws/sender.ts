@@ -1,4 +1,5 @@
 import type { WebSocket } from "ws";
+import WebSocketLib from "ws";
 
 import { MESSAGE_RESPONSE_TYPE } from "@/messaging/types";
 import type {
@@ -6,8 +7,6 @@ import type {
   MessageResult,
   MessageType,
 } from "@/types/messages/ws";
-
-export const MESSAGE_RESPONSE_TYPE_EXPORT = MESSAGE_RESPONSE_TYPE;
 
 function generateId(): string {
   if (typeof globalThis.crypto?.randomUUID === "function") {
@@ -34,9 +33,9 @@ export function createSocketMessageSender<
 
     return new Promise((resolve, reject) => {
       const cleanup = () => {
-        removeResponseListener();
-        ws.removeEventListener("error", errorHandler);
-        ws.removeEventListener("close", cleanup);
+        ws.off("message", messageHandler);
+        ws.off("error", errorHandler);
+        ws.off("close", closeHandler);
         if (timeoutId) {
           clearTimeout(timeoutId);
         }
@@ -50,33 +49,45 @@ export function createSocketMessageSender<
         }, timeoutMs);
       }
 
-      const removeResponseListener = addSocketMessageResponseListener(
-        ws,
-        (responseMessage) => {
-          const { payload: responsePayload } = responseMessage;
-          if (responsePayload.requestId !== id) {
-            return;
-          }
+      const messageHandler = (data: WebSocketLib.RawData) => {
+        const raw = typeof data === "string" ? data : data.toString();
+        const parsed = JSON.parse(raw) as {
+          type: string;
+          payload: { requestId: string; result?: unknown; error?: string };
+        };
 
-          const { result, error } = responsePayload;
-          if (error) {
-            reject(new Error(error));
-          } else {
-            resolve(result as MessageResult<TMap, K>);
-          }
-          cleanup();
-        },
-      );
+        if (parsed.type !== MESSAGE_RESPONSE_TYPE) {
+          return;
+        }
+
+        if (parsed.payload.requestId !== id) {
+          return;
+        }
+
+        const { result, error } = parsed.payload;
+        if (error) {
+          reject(new Error(error));
+        } else {
+          resolve(result as MessageResult<TMap, K>);
+        }
+        cleanup();
+      };
 
       const errorHandler = () => {
         cleanup();
         reject(new Error("WebSocket error occurred"));
       };
 
-      ws.addEventListener("error", errorHandler);
-      ws.addEventListener("close", cleanup);
+      const closeHandler = () => {
+        cleanup();
+        reject(new Error("WebSocket closed before response"));
+      };
 
-      if (ws.readyState === ws.OPEN) {
+      ws.on("message", messageHandler);
+      ws.on("error", errorHandler);
+      ws.on("close", closeHandler);
+
+      if (ws.readyState === WebSocketLib.OPEN) {
         ws.send(JSON.stringify(message));
       } else {
         cleanup();
@@ -86,35 +97,4 @@ export function createSocketMessageSender<
   }
 
   return { sendSocketMessage };
-}
-
-function addSocketMessageResponseListener(
-  ws: WebSocket,
-  listener: (message: {
-    type: typeof MESSAGE_RESPONSE_TYPE;
-    payload: { requestId: string; result?: unknown; error?: string };
-  }) => void | Promise<void>,
-): () => void {
-  const messageListener = async (event: WebSocket.MessageEvent) => {
-    const data =
-      typeof event.data === "string"
-        ? event.data
-        : event.data.toString();
-    const message = JSON.parse(data) as {
-      type: string;
-      payload: { requestId: string; result?: unknown; error?: string };
-    };
-
-    if (message.type !== MESSAGE_RESPONSE_TYPE) {
-      return;
-    }
-
-    await listener({
-      type: MESSAGE_RESPONSE_TYPE,
-      payload: message.payload,
-    });
-  };
-
-  ws.addEventListener("message", messageListener);
-  return () => ws.removeEventListener("message", messageListener);
 }

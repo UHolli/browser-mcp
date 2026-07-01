@@ -3,6 +3,7 @@ import type { ElementParams } from "@/types/mcp/tool";
 export type ConsoleLogEntry = Record<string, unknown>;
 
 export interface SocketMessageMap {
+  [key: string]: { payload: unknown; result: unknown };
   browser_navigate: { payload: { url: string }; result: void };
   browser_go_back: { payload: Record<string, never>; result: void };
   browser_go_forward: { payload: Record<string, never>; result: void };

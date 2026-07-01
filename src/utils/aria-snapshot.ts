@@ -1,4 +1,4 @@
-import { Context } from "@/context";
+import type { Context } from "@/context";
 import type { ToolResult } from "@/tools/tool";
 
 export async function captureAriaSnapshot(
